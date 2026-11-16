@@ -1,0 +1,21 @@
+{
+  "name": "Amorim Beauty — Gestão do salão",
+  "short_name": "Amorim",
+  "description": "Agenda, clientes, serviços e profissionais do Amorim Beauty.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f6f1ec",
+  "theme_color": "#f6f1ec",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
