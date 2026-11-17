@@ -9,7 +9,8 @@ export default handler(async (req, res) => {
   const [services, professionals, slots] = await Promise.all([
     sql`select * from services where active = true order by category, name`,
     sql`select id, name, role, color, active, hours from professionals where active = true order by name`,
-    sql`select * from slots where status = 'livre' and appt_date >= current_date order by appt_date, start_time`
+    sql`select id, appt_date::text as appt_date, start_time::text as start_time, duration_min, professional_id, status, appointment_id, created_at
+        from slots where status = 'livre' and appt_date >= current_date order by appt_date, start_time`
   ]);
 
   let needsSetup = false;

@@ -10,8 +10,11 @@ export default handler(async (req, res) => {
     sql`select * from clients order by name`,
     sql`select * from services order by category, name`,
     sql`select * from professionals order by name`,
-    sql`select * from appointments order by appt_date, start_time`,
-    sql`select * from slots order by appt_date, start_time`
+    sql`select id, client_id, service_id, service_name, professional_id, appt_date::text as appt_date, start_time::text as start_time,
+               duration_min, price_cents, status, is_fit_in, notes, slot_id, created_at
+        from appointments order by appt_date, start_time`,
+    sql`select id, appt_date::text as appt_date, start_time::text as start_time, duration_min, professional_id, status, appointment_id, created_at
+        from slots order by appt_date, start_time`
   ]);
 
   send(res, 200, {

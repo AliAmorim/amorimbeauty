@@ -37,6 +37,35 @@ export function getId(req) {
   return url.searchParams.get('id');
 }
 
+// O driver do Neon pode entregar DATE como objeto Date e TIME como 'HH:MM:SS'. Se isso
+// escapar como Date, o JSON vira "2026-11-20T03:00:00.000Z" e clientes antigos montam
+// "Invalid Date" (era o "NaN" no dia em producao). Por isso TODAS as consultas que
+// devolvem slots/appointments usam appt_date::text e start_time::text, e ainda
+// normalizamos aqui como segunda barreira.
+export function dbDate(v) {
+  if (v == null) return null;
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return null;
+    return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+  }
+  const s = String(v).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+export function dbTime(v) {
+  if (v == null) return null;
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return null;
+    return String(v.getHours()).padStart(2, '0') + ':' + String(v.getMinutes()).padStart(2, '0');
+  }
+  const m = String(v).match(/^(\d{1,2}):(\d{2})/);
+  return m ? String(Number(m[1])).padStart(2, '0') + ':' + m[2] : null;
+}
+
 export const mapClient = (r) => ({
   id: r.id,
   name: r.name,
@@ -73,8 +102,8 @@ export const mapAppointment = (r) => ({
   serviceId: r.service_id,
   serviceName: r.service_name,
   professionalId: r.professional_id,
-  date: String(r.appt_date).slice(0, 10),
-  start: String(r.start_time).slice(0, 5),
+  date: dbDate(r.appt_date),
+  start: dbTime(r.start_time),
   duration: r.duration_min,
   price: r.price_cents,
   status: r.status,
@@ -86,11 +115,29 @@ export const mapAppointment = (r) => ({
 
 export const mapSlot = (r) => ({
   id: r.id,
-  date: String(r.appt_date).slice(0, 10),
-  start: String(r.start_time).slice(0, 5),
+  date: dbDate(r.appt_date),
+  start: dbTime(r.start_time),
   duration: r.duration_min,
   professionalId: r.professional_id,
   status: r.status,
   appointmentId: r.appointment_id || null,
   createdAt: r.created_at
 });
+
+// Validacao de entrada: nunca gravar data/hora fora do formato nao deixa o banco
+// guardar lixo que so apareceria depois como dia invalido na interface.
+export function isISODate(v) {
+  const m = String(v == null ? '' : v).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(m)) return false;
+  const p = m.split('-').map(Number);
+  const d = new Date(p[0], p[1] - 1, p[2]);
+  return d.getFullYear() === p[0] && d.getMonth() === p[1] - 1 && d.getDate() === p[2];
+}
+
+export function isHHMM(v) {
+  const m = String(v == null ? '' : v).trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return false;
+  const h = Number(m[1]);
+  const mi = Number(m[2]);
+  return h >= 0 && h <= 23 && mi >= 0 && mi <= 59;
+}

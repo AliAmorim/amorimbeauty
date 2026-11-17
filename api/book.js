@@ -1,8 +1,14 @@
-import { db, handler, send, readBody, mapClient, mapAppointment, mapSlot } from './_db.js';
+import { db, handler, send, readBody, mapClient, mapAppointment, mapSlot, dbDate, dbTime } from './_db.js';
 
 function toMin(t) {
   const p = String(t || '00:00').slice(0, 5).split(':').map(Number);
   return (p[0] || 0) * 60 + (p[1] || 0);
+}
+
+function weekdayOf(iso) {
+  const p = String(iso || '').split('-').map(Number);
+  if (p.length !== 3 || !isFinite(p[0])) return null;
+  return new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay();
 }
 
 async function releaseSlot(sql, id) {
@@ -39,8 +45,8 @@ export default handler(async (req, res) => {
   const endMin = startMin + Number(service.duration_min);
 
   if (prof && prof.hours) {
-    const dow = new Date(String(slot.appt_date).slice(0, 10) + 'T12:00:00Z').getUTCDay();
-    const hrs = prof.hours[dow];
+    const dow = weekdayOf(dbDate(slot.appt_date));
+    const hrs = dow == null ? null : prof.hours[dow];
     if (hrs && hrs[1] && endMin > toMin(hrs[1])) {
       await releaseSlot(sql, slot.id);
       return send(res, 409, { error: 'Este serviço termina depois do horário de atendimento. Escolha outro horário.' });
@@ -91,14 +97,21 @@ export default handler(async (req, res) => {
       (client_id, service_id, service_name, professional_id, appt_date, start_time, duration_min, price_cents, status, is_fit_in, notes, slot_id)
     values (
       ${client.id}, ${service.id}, ${service.name}, ${slot.professional_id},
-      ${slot.appt_date}, ${slot.start_time}, ${service.duration_min}, ${priceCents},
+      ${dbDate(slot.appt_date)}, ${dbTime(slot.start_time)}, ${service.duration_min}, ${priceCents},
       'agendado', false, 'Reserva feita pela cliente pelo agendamento online.', ${slot.id}
     )
-    returning *`;
-  const appointment = apptRows[0];
+    returning id`;
+  const appointment = (await sql`
+    select id, client_id, service_id, service_name, professional_id,
+           appt_date::text as appt_date, start_time::text as start_time,
+           duration_min, price_cents, status, is_fit_in, notes, slot_id, created_at
+    from appointments where id = ${apptRows[0].id}`)[0];
 
   await sql`update slots set appointment_id = ${appointment.id} where id = ${slot.id}`;
-  const slotRow = (await sql`select * from slots where id = ${slot.id}`)[0];
+  const slotRow = (await sql`
+    select id, appt_date::text as appt_date, start_time::text as start_time,
+           duration_min, professional_id, status, appointment_id, created_at
+    from slots where id = ${slot.id}`)[0];
 
   send(res, 201, {
     appointment: mapAppointment(appointment),

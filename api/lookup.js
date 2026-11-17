@@ -17,7 +17,10 @@ export default handler(async (req, res) => {
   if (!clients.length) return send(res, 200, { name: '', appointments: [] });
 
   const rows = await sql`
-    select a.* from appointments a
+    select a.id, a.client_id, a.service_id, a.service_name, a.professional_id,
+           a.appt_date::text as appt_date, a.start_time::text as start_time,
+           a.duration_min, a.price_cents, a.status, a.is_fit_in, a.notes, a.slot_id, a.created_at
+    from appointments a
     where a.client_id in (
       select id from clients where regexp_replace(phone, '[^0-9]', '', 'g') = ${phone}
     )
