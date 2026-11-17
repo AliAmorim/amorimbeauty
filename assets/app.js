@@ -57,10 +57,46 @@
   const booking = { date: null, slotId: null, serviceId: null, step: 'browse', confirmed: null, error: '', draft: { name: '', phone: '' } };
 
   function pad(n) { return String(n).padStart(2, '0'); }
-  function isoDate(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function isoDate(d) {
+    if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
   function todayISO() { return isoDate(new Date()); }
-  function fromISO(s) { const p = String(s).slice(0, 10).split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); }
-  function addDays(iso, n) { const d = fromISO(iso); d.setDate(d.getDate() + n); return isoDate(d); }
+  function fromISO(s) {
+    const n = normDate(s);
+    const p = n.split('-').map(Number);
+    return new Date(p[0], p[1] - 1, p[2]);
+  }
+  function isISO(s) {
+    const m = String(s == null ? '' : s).trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(m)) return false;
+    const d = fromISO(m);
+    return !isNaN(d.getTime()) && isoDate(d) === m;
+  }
+  // A API pode devolver DATE como objeto Date ou string com fuso/hora. Normalizamos
+  // para 'YYYY-MM-DD' e 'HH:MM' para que nada exiba NaN/undefined na interface.
+  function normDate(v) {
+    if (v == null) return '';
+    if (v instanceof Date) return isNaN(v.getTime()) ? '' : isoDate(v);
+    const s = String(v).trim();
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3];
+    if (!/\d{4}/.test(s)) return '';
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? '' : isoDate(d);
+  }
+  function normTime(v) {
+    const m = String(v == null ? '' : v).match(/^(\d{1,2}):(\d{2})/);
+    return m ? pad(Number(m[1])) + ':' + m[2] : '';
+  }
+  function normSlot(s) { return Object.assign({}, s, { date: normDate(s.date), start: normTime(s.start) }); }
+  function normAppt(a) { return Object.assign({}, a, { date: normDate(a.date), start: normTime(a.start) }); }
+  function addDays(iso, n) {
+    if (!isISO(iso)) return '';
+    const d = fromISO(iso);
+    d.setDate(d.getDate() + n);
+    return isoDate(d);
+  }
   function toMin(t) { const p = String(t || '00:00').split(':').map(Number); return (p[0] || 0) * 60 + (p[1] || 0); }
   function fromMin(m) { return pad(Math.floor(m / 60)) + ':' + pad(m % 60); }
   function nowMin() { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
@@ -70,11 +106,12 @@
   function uid(p) { return p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
   function longDate(iso) {
+    if (!isISO(iso)) return 'Data a confirmar';
     const d = fromISO(iso);
     return WD[d.getDay()] + ', ' + d.getDate() + ' de ' + MO[d.getMonth()];
   }
   function shortDate(iso) {
-    if (!iso) return '—';
+    if (!isISO(iso)) return '—';
     const d = fromISO(iso);
     return pad(d.getDate()) + '/' + pad(d.getMonth() + 1);
   }
@@ -83,14 +120,19 @@
     return WD_S[d.getDay()] + ', ' + d.getDate() + ' ' + MO[d.getMonth()].slice(0, 3);
   }
   function weekStart(iso) {
+    if (!isISO(iso)) return '';
     const d = fromISO(iso);
     const off = (d.getDay() + 6) % 7;
     d.setDate(d.getDate() - off);
     return isoDate(d);
   }
   function weekLabel(iso) {
-    const s = fromISO(weekStart(iso));
-    const e = fromISO(addDays(weekStart(iso), 6));
+    const start = weekStart(iso);
+    if (!start) return 'Semana';
+    const end = addDays(start, 6);
+    if (!end) return cap(longDate(start));
+    const s = fromISO(start);
+    const e = fromISO(end);
     if (s.getMonth() === e.getMonth()) return s.getDate() + ' – ' + e.getDate() + ' de ' + MO[s.getMonth()];
     return s.getDate() + ' ' + MO[s.getMonth()].slice(0, 3) + ' – ' + e.getDate() + ' ' + MO[e.getMonth()].slice(0, 3);
   }
@@ -240,6 +282,15 @@
       Object.assign(state, saved.data);
       state.seededOn = saved.seededOn;
       state.touched = !!saved.touched;
+      // Dados salvos por versões anteriores podem ter datas em outro formato.
+      // Normalizamos na entrada para que nada renderize NaN/undefined.
+      state.clients = Array.isArray(state.clients) ? state.clients : [];
+      state.services = Array.isArray(state.services) ? state.services : [];
+      state.professionals = state.professionals.filter((p) => p && p.id);
+      state.appointments = (Array.isArray(state.appointments) ? state.appointments : [])
+        .map(normAppt).filter((a) => a && isISO(a.date));
+      state.slots = (Array.isArray(state.slots) ? state.slots : [])
+        .map(normSlot).filter((s) => s && isISO(s.date) && s.start);
       if (!Array.isArray(saved.data.slots)) {
         state.slots = seedSlots();
         persist();
@@ -285,7 +336,7 @@
   function applyPublicData(data) {
     state.services = data.services || [];
     state.professionals = data.professionals || [];
-    state.slots = data.slots || [];
+    state.slots = (data.slots || []).map(normSlot).filter((s) => isISO(s.date) && s.start);
     state.clients = [];
     state.appointments = [];
     if (typeof data.needsSetup === 'boolean') state.needsSetup = data.needsSetup;
@@ -339,11 +390,13 @@
 
   async function loadAdminData() {
     const data = await apiFetch('/api/bootstrap');
-    state.clients = data.clients || [];
-    state.services = data.services || [];
-    state.professionals = data.professionals || [];
-    state.appointments = data.appointments || [];
-    state.slots = data.slots || [];
+    state.clients = Array.isArray(data.clients) ? data.clients : [];
+    state.services = Array.isArray(data.services) ? data.services : [];
+    state.professionals = Array.isArray(data.professionals) ? data.professionals : [];
+    state.appointments = (Array.isArray(data.appointments) ? data.appointments : [])
+      .map(normAppt).filter((a) => a && isISO(a.date));
+    state.slots = (Array.isArray(data.slots) ? data.slots : [])
+      .map(normSlot).filter((s) => s && isISO(s.date));
   }
 
   async function ensureClientData() {
@@ -511,7 +564,8 @@
   function slotById(id) { return state.slots.find((s) => s.id === id); }
   function upcomingSlots() {
     const t = todayISO();
-    return state.slots.filter((s) => s.date >= t).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+    return state.slots.filter((s) => isISO(s.date) && normTime(s.start) && s.date >= t)
+      .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
   }
   function slotBookable(v) {
     return !findConflict(v.professionalId, v.date, v.start, 15, null);
@@ -626,6 +680,7 @@
   }
 
   function renderAgenda() {
+    if (!isISO(state.date)) state.date = todayISO();
     const isWeek = state.calView === 'week';
     $('#agendaTitle').textContent = isWeek ? cap(weekLabel(state.date)) : cap(longDate(state.date));
 
@@ -775,6 +830,7 @@
 
   function renderWeek() {
     const start = weekStart(state.date);
+    if (!start) { $('#agendaBoard').innerHTML = ''; return; }
     const pros = visiblePros();
     let html = '<div class="week">';
     for (let i = 0; i < 7; i++) {
@@ -1136,7 +1192,7 @@
     try {
       if (state.mode === 'neon') {
         const res = await publicFetch('/api/lookup?phone=' + encodeURIComponent(digits));
-        state.lookupResult = { phone: phone, name: res.name || '', appointments: res.appointments || [] };
+        state.lookupResult = { phone: phone, name: res.name || '', appointments: (res.appointments || []).map(normAppt) };
       } else {
         const c = state.clients.find((x) => phoneDigits(x.phone) === digits);
         state.lookupResult = { phone: phone, name: c ? c.name : '', appointments: lookupAppointments(digits) };
@@ -1305,14 +1361,16 @@
     }
 
     const dates = [];
-    free.forEach((x) => { if (!dates.includes(x.date)) dates.push(x.date); });
+    free.forEach((x) => { if (isISO(x.date) && !dates.includes(x.date)) dates.push(x.date); });
     dates.sort();
-    if (!dates.includes(booking.date)) booking.date = dates[0];
-    const chosen = free.filter((x) => x.date === booking.date).slice().sort((a, b) => toMin(a.start) - toMin(b.start));
+    if (!dates.length) booking.date = null;
+    else if (!dates.includes(booking.date)) booking.date = dates[0];
+    const chosen = dates.length ? free.filter((x) => x.date === booking.date).slice().sort((a, b) => toMin(a.start) - toMin(b.start)) : [];
 
     let strip = '';
     dates.forEach((date) => {
       const d = fromISO(date);
+      if (isNaN(d.getTime())) return;
       const n = free.filter((x) => x.date === date).length;
       strip += '<button class="date-pill' + (booking.date === date ? ' is-active' : '') + '" data-action="book-date" data-date="' + date + '">' +
         '<span class="dp-wd">' + WD_S[d.getDay()] + '</span><span class="dp-day">' + d.getDate() + '</span>' +
